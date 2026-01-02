@@ -187,10 +187,46 @@ contract Identity is IIdentity {
         payable
         override
         returns (uint256 executionId)
-    {}
+    {
+        bytes32 senderKey = keccak256(abi.encodePacked(msg.sender));
 
-    function approve(uint256 _id, bool _approve) external override returns (bool success) {}
+        // Check if sender has ACTION_KEY (2) or MANAGEMENT_KEY (1)
+        if (!keyHasPurpose(senderKey, 2) && !keyHasPurpose(senderKey, 1)) {
+            revert NotAuthorized();
+        }
 
+        executionNonce++;
+        executionId = executionNonce;
+
+        emit ExecutionRequested(executionId, _to, _value, _data);
+
+        // Execute the call
+        (bool success,) = _to.call{value: _value}(_data);
+
+        if (success) {
+            emit Executed(executionId, _to, _value, _data);
+        } else {
+            emit ExecutionFailed(executionId, _to, _value, _data);
+        }
+
+        return executionId;
+    }
+
+    /**
+     * @inheritdoc IIdentity
+     */
+    function approve(uint256 _id, bool _approve) external override onlyManagement returns (bool success) {
+        emit Approved(_id, _approve);
+        return true;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                    ERC-735 CLAIM MANAGEMENT FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @inheritdoc IIdentity
+     */
     function getClaim(bytes32 _claimId)
         external
         view
@@ -203,10 +239,22 @@ contract Identity is IIdentity {
             bytes memory data,
             string memory uri
         )
-    {}
+    {
+        Claim memory claim = claims[_claimId];
 
-    function getClaimIdsByTopic(uint256 _topic) external view override returns (bytes32[] memory claimIds) {}
+        return (claim.topic, claim.scheme, claim.issuer, claim.signature, claim.data, claim.uri);
+    }
 
+    /**
+     * @inheritdoc IIdentity
+     */
+    function getClaimIdsByTopic(uint256 _topic) external view override returns (bytes32[] memory claimIds) {
+        return claimsByTopic[_topic];
+    }
+
+    /**
+     * @inheritdoc IIdentity
+     */
     function addClaim(
         uint256 _topic,
         uint256 _scheme,
@@ -214,7 +262,69 @@ contract Identity is IIdentity {
         bytes calldata _signature,
         bytes calldata _data,
         string calldata _uri
-    ) external override returns (bytes32 claimRequestId) {}
+    ) external override returns (bytes32 claimRequestId) {
+        bytes32 senderKey = keccak256(abi.encodePacked(msg.sender));
 
-    function removeClaim(bytes32 _claimId) external override returns (bool success) {}
+        // Check if sendeer has CLAIM_KEY (3) or MANAGEMENT_KEY (1)
+        if (!keyHasPurpose(senderKey, 3) && !keyHasPurpose(senderKey, 1)) {
+            revert NotAuthorized();
+        }
+
+        // Generate claim ID
+        claimNonce++;
+        claimRequestId = keccak256(abi.encodePacked(address(this), _topic, _scheme, _issuer, _data, claimNonce));
+
+        // Store claim
+        claims[claimRequestId] =
+            Claim({topic: _topic, scheme: _scheme, issuer: _issuer, signature: _signature, data: _data, uri: _uri});
+
+        // Index by topic
+        claimsByTopic[_topic].push(claimRequestId);
+        claimIndexInTopic[claimRequestId] = claimsByTopic[_topic].length - 1;
+
+        emit ClaimAdded(claimRequestId, _topic, _scheme, _issuer, _signature, _data, _uri);
+
+        return claimRequestId;
+    }
+
+    /**
+     * @inheritdoc IIdentity
+     */
+    function removeClaim(bytes32 _claimId) external override returns (bool success) {
+        bytes32 senderKey = keccak256(abi.encodePacked(msg.sender));
+
+        // Check if sender has CLAIM_KEY (3) or MANAGEMENT_KEY (1)
+        if (!keyHasPurpose(senderKey, 3) && !keyHasPurpose(senderKey, 1)) {
+            revert NotAuthorized();
+        }
+
+        Claim memory claim = claims[_claimId];
+
+        if (claim.topic == 0) {
+            revert ClaimNotFound();
+        }
+
+        // Remove from topic index
+        uint256 index = claimIndexInTopic[_claimId];
+        uint256 lastIndex = claimsByTopic[claim.topic].length - 1;
+
+        if (index != lastIndex) {
+            bytes32 lastClaimId = claimsByTopic[claim.topic][lastIndex];
+            claimsByTopic[claim.topic][index] = lastClaimId;
+            claimIndexInTopic[lastClaimId] = index;
+        }
+
+        claimsByTopic[claim.topic].pop();
+        delete claimIndexInTopic[_claimId];
+
+        emit ClaimRemoved(_claimId, claim.topic, claim.scheme, claim.issuer, claim.signature, claim.data, claim.uri);
+
+        delete claims[_claimId];
+        return true;
+    }
+
+    /**
+     * @dev Fallback function to accept ETH
+     */
+    receive() external payable {}
 }
