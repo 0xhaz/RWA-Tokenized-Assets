@@ -94,4 +94,194 @@ contract IdentityRegistryStorageTest is Test {
         vm.expectRevert();
         storage_.unbindIdentityRegistry(registry1);
     }
+
+    /*//////////////////////////////////////////////////////////////
+                           ADD IDENTITY TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_AddIdentityToStorage_Success() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.expectEmit(true, true, false, false);
+        emit IdentityStored(user1, identity1);
+
+        vm.prank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+
+        assertEq(address(storage_.storedIdentity(user1)), address(identity1));
+        assertEq(storage_.storedInvestorCountry(user1), US_CODE);
+    }
+
+    function test_AddIdentityToStorage_RevertIf_NotBoundRegistry() public {
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+    }
+
+    function test_AddIdentityToStorage_RevertIf_ZeroAddress() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.addIdentityToStorage(address(0), identity1, US_CODE);
+    }
+
+    function test_AddIdentityToStorage_RevertIf_IdentityExists() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.startPrank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+
+        vm.expectRevert();
+        storage_.addIdentityToStorage(user1, identity2, UK_CODE);
+        vm.stopPrank();
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                         REMOVE IDENTITY TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_RemoveIdentityFromStorage_Success() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.startPrank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+
+        vm.expectEmit(true, true, false, false);
+        emit IdentityUnstored(user1, identity1);
+
+        storage_.removeIdentityFromStorage(user1);
+        vm.stopPrank();
+
+        assertEq(address(storage_.storedIdentity(user1)), address(0));
+        assertEq(storage_.storedInvestorCountry(user1), 0);
+    }
+
+    function test_RemoveIdentityFromStorage_RevertIf_NotBoundRegistry() public {
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.removeIdentityFromStorage(user1);
+    }
+
+    function test_RemoveIdentityFromStorage_RevertIf_IdentityNotFound() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.removeIdentityFromStorage(user1);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                         MODIFY IDENTITY TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_ModifyStoredIdentity_Success() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.startPrank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+
+        vm.expectEmit(true, true, false, false);
+        emit IdentityModified(identity1, identity2);
+
+        storage_.modifyStoredIdentity(user1, identity2);
+        vm.stopPrank();
+
+        assertEq(address(storage_.storedIdentity(user1)), address(identity2));
+    }
+
+    function test_ModifyStoredIdentity_RevertIf_NotBoundRegistry() public {
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.modifyStoredIdentity(user1, identity2);
+    }
+
+    function test_ModifyStoredIdentity_RevertIf_IdentityNotFound() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.modifyStoredIdentity(user1, identity2);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                          MODIFY COUNTRY TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_ModifyStoredInvestorCountry_Success() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.startPrank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+
+        vm.expectEmit(true, true, false, false);
+        emit CountryModified(user1, UK_CODE);
+
+        storage_.modifyStoredInvestorCountry(user1, UK_CODE);
+        vm.stopPrank();
+
+        assertEq(storage_.storedInvestorCountry(user1), UK_CODE);
+    }
+
+    function test_ModifyStoredInvestorCountry_RevertIf_NotBoundRegistry() public {
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.modifyStoredInvestorCountry(user1, UK_CODE);
+    }
+
+    function test_ModifyStoredInvestorCountry_RevertIf_IdentityNotFound() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.modifyStoredInvestorCountry(user1, UK_CODE);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                          MULTI-REGISTRY TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_MultipleRegistries_CanAccessSameStorage() public {
+        storage_.bindIdentityRegistry(registry1);
+        storage_.bindIdentityRegistry(registry2);
+
+        vm.prank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+
+        vm.prank(registry2);
+        storage_.modifyStoredInvestorCountry(user1, UK_CODE);
+
+        assertEq(storage_.storedInvestorCountry(user1), UK_CODE);
+    }
+
+    function test_UnboundRegistry_CannotAccess() public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.prank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, US_CODE);
+
+        storage_.unbindIdentityRegistry(registry1);
+
+        vm.prank(registry1);
+        vm.expectRevert();
+        storage_.modifyStoredInvestorCountry(user1, UK_CODE);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                               EDGE CASES
+    //////////////////////////////////////////////////////////////*/
+
+    function testFuzz_AddIdentity_DifferentCountries(uint16 countryCode) public {
+        storage_.bindIdentityRegistry(registry1);
+
+        vm.prank(registry1);
+        storage_.addIdentityToStorage(user1, identity1, countryCode);
+
+        assertEq(storage_.storedInvestorCountry(user1), countryCode);
+    }
+
+    function test_StoredIdentity_ReturnsZeroForNonExistent() public view {
+        assertEq(address(storage_.storedIdentity(user1)), address(0));
+        assertEq(storage_.storedInvestorCountry(user1), 0);
+    }
 }
